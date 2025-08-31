@@ -15,10 +15,13 @@ def main():
 
     dex_key = os.getenv("DEXSCREENER_API_KEY") or None
     birdeye_key = os.getenv("BIRDEYE_API_KEY") or None
+    if not birdeye_key:
+        print("[WARN] BIRDEYE_API_KEY missing - skipping enrichment")
     max_pairs = int(os.getenv("MAX_NEW_PAIRS", "500"))
     min_liq = float(os.getenv("MIN_LIQUIDITY_USD", "5000"))
 
     pairs = fetch_new_pairs_dexscreener(dex_key, max_pairs=max_pairs)
+    print(f"[INFO] Dexscreener pairs fetched: {len(pairs)}")
 
     rows = []
     for p in pairs:
@@ -52,6 +55,7 @@ def main():
     ])
 
     top10 = rank_top10(df, min_liq_usd=min_liq) if not df.empty else df
+    print(f"[INFO] Pairs after filters: {len(top10)}")
     top10.to_csv(out_path, index=False)
     print(f"[OK] {len(top10)} rows -> {out_path}")
 
