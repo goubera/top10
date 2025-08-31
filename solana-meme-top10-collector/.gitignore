@@ -1,3 +1,7 @@
+# Autoriser les CSV générés par le collecteur
+!solana-meme-top10-collector/data/
+!solana-meme-top10-collector/data/*.csv
+
 .venv/
 .env
 __pycache__/
