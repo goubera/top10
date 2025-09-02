@@ -40,22 +40,15 @@ jobs:
           python --version
           pip list
 
-      - name: Create .env from GitHub Secrets
-        working-directory: solana-meme-top10-collector
-        run: |
-          echo "Writing .env"
-          {
-            echo "DEXSCREENER_API_KEY=${{ secrets.DEXSCREENER_API_KEY }}"
-            echo "BIRDEYE_API_KEY=${{ secrets.BIRDEYE_API_KEY }}"
-            echo "HELIUS_API_KEY=${{ secrets.HELIUS_API_KEY }}"
-            echo "MAX_NEW_PAIRS=500"
-            echo "MIN_LIQUIDITY_USD=5000"
-            echo "EARLY_WINDOW_MIN=60"
-          } >> .env
-
-      - name: Run tests
+      # --- Tests : seulement s'il y en a ---
+      - name: Run tests (if any)
+        if: ${{ hashFiles('solana-meme-top10-collector/test_*.py', 'solana-meme-top10-collector/*_test.py', 'solana-meme-top10-collector/tests/**.py') != '' }}
         working-directory: solana-meme-top10-collector
         run: pytest -q
+
+      - name: No tests found, skipping
+        if: ${{ hashFiles('solana-meme-top10-collector/test_*.py', 'solana-meme-top10-collector/*_test.py', 'solana-meme-top10-collector/tests/**.py') == '' }}
+        run: echo "No pytest tests collected. Skipping test step."
 
       - name: Run collector
         working-directory: solana-meme-top10-collector
