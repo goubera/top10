@@ -12,6 +12,14 @@ make test       # run tests
 ```
 CSV files will appear in `solana-meme-top10-collector/data/`.
 
+## Tests
+```bash
+cd solana-meme-top10-collector
+pip install -r requirements.txt
+pytest -q
+```
+Add new tests in `solana-meme-top10-collector/tests/`.
+
 ## CI details
 - GitHub Actions workflow runs daily at **06:10 UTC** and on manual dispatch.
 - Each run installs dependencies with caching, writes `.env` from secrets, executes tests, runs the collector, lists the `data/` folder and commits the daily CSV.
