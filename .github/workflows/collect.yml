@@ -53,6 +53,28 @@ jobs:
         working-directory: solana-meme-top10-collector
         run: python collector.py
 
+      - name: Notify Slack
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -f solana-meme-top10-collector/data/run_summary.json ]; then
+            python - <<'PY'
+import json, csv, os, pathlib, requests, sys
+data_dir = pathlib.Path('solana-meme-top10-collector/data')
+meta = json.load(open(data_dir/'run_summary.json'))
+rows = list(csv.DictReader(open(data_dir/f"top10_{meta['date']}.csv")))
+top3 = ', '.join(r.get('baseSymbol','') for r in rows[:3])
+payload = {'text': f"{meta['date']}: {meta['raw_pairs']} pairs -> top3 {top3}"}
+try:
+    requests.post(os.environ['SLACK_WEBHOOK_URL'], json=payload, timeout=10).raise_for_status()
+except Exception as e:
+    print(f"Slack notify failed: {e}", file=sys.stderr)
+PY
+          else
+            echo 'No summary for Slack'
+          fi
+
       - name: List data folder
         working-directory: solana-meme-top10-collector
         run: ls -l data || true
