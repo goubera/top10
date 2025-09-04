@@ -1,4 +1,4 @@
-import time, requests
+import time, requests, logging
 from datetime import datetime, timezone
 
 DEX_NEW_PAIRS_URLS = [
@@ -7,6 +7,7 @@ DEX_NEW_PAIRS_URLS = [
 ]
 BIRDEYE_BASE = "https://public-api.birdeye.so"
 DEFAULT_HEADERS = {"User-Agent": "top10-collector/1.0"}
+logger = logging.getLogger(__name__)
 
 def now_iso_date():
     return datetime.now(timezone.utc).astimezone().date().isoformat()
@@ -24,12 +25,14 @@ def http_get(url, headers=None, params=None, timeout=15, retries=3):
         try:
             r = requests.get(url, headers=headers, params=params, timeout=timeout)
             if r.status_code == 429 or r.status_code >= 500:
+                logger.warning("http_get retry=%s status=%s", attempt, r.status_code)
                 time.sleep(2 ** attempt)
                 continue
             r.raise_for_status()
             return r.json()
         except Exception as e:
             last_error = str(e)
+            logger.warning("http_get error attempt=%s err=%s", attempt, e)
             time.sleep(2 ** attempt)
     return {"_error": last_error or "unknown"}
 
@@ -47,13 +50,13 @@ def fetch_new_pairs_dexscreener(api_key: str | None, max_pairs: int = 500):
     for url in DEX_NEW_PAIRS_URLS:
         data = http_get(url, headers=headers)
         if "_error" in data:
-            print(f"[WARN] Dexscreener error: {data['_error']}")
+            logger.warning("Dexscreener error: %s", data['_error'])
             continue
         pairs = data.get("pairs") or []
         if pairs:
             break
     if not pairs:
-        print("[WARN] Dexscreener returned no pairs")
+        logger.warning("Dexscreener returned no pairs")
         return []
     out = []
     for p in pairs[:max_pairs]:

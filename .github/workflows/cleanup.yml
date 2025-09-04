@@ -1,0 +1,32 @@
+name: Cleanup old CSVs
+
+on:
+  schedule:
+    - cron: "20 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Remove old CSVs
+        run: |
+          find solana-meme-top10-collector/data -name 'top10_*.csv' -mtime +180 -print -delete
+          find solana-meme-top10-collector/archive -name '*.csv' -mtime +180 -print -delete
+
+      - name: Commit cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f solana-meme-top10-collector/data solana-meme-top10-collector/archive || true
+          git commit -m "Cleanup old CSVs" || echo "No changes"
+          git push
