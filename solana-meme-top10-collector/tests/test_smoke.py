@@ -2,8 +2,8 @@ import pathlib, sys
 import pandas as pd
 
 # ensure collector module path
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT / "solana-meme-top10-collector"))
+COLLECTOR_DIR = pathlib.Path(__file__).resolve().parents[1]
+sys.path.append(str(COLLECTOR_DIR))
 import collector
 
 
