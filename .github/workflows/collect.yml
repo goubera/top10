@@ -36,18 +36,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
           python --version
           pip list
 
       # --- Tests : seulement s'il y en a ---
       - name: Run tests (if any)
-        if: ${{ hashFiles('solana-meme-top10-collector/test_*.py', 'solana-meme-top10-collector/*_test.py', 'solana-meme-top10-collector/tests/**.py') != '' }}
+        if: ${{ hashFiles('solana-meme-top10-collector/tests/**.py') != '' }}
         working-directory: solana-meme-top10-collector
         run: pytest -q
 
       - name: No tests found, skipping
-        if: ${{ hashFiles('solana-meme-top10-collector/test_*.py', 'solana-meme-top10-collector/*_test.py', 'solana-meme-top10-collector/tests/**.py') == '' }}
+        if: ${{ hashFiles('solana-meme-top10-collector/tests/**.py') == '' }}
         run: echo "No pytest tests collected. Skipping test step."
 
       - name: Run collector
