@@ -1,0 +1,24 @@
+name: Cleanup smoke
+on: { workflow_dispatch: {} }
+jobs:
+  cleanup_smoke:
+    permissions: { contents: write }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Create temp files for deletion
+        run: |
+          mkdir -p solana-meme-top10-collector/data
+          echo "date,chain,baseToken,baseSymbol,pairAddress,tokenAddress,priceUsd,liquidityUsd,volume24hUsd,txns24h,priceChange24h,createdAt,earlyReturnMultiple,holders,exitLiquidity,hasMintAuth,hasFreezeAuth,notes" > solana-meme-top10-collector/data/top10_TMP.csv
+      - name: Delete with relaxed mtime (simulate)
+        run: |
+          # pour le smoke, on supprime directement (pas besoin d’attendre 180 jours)
+          find solana-meme-top10-collector/data -type f -name "top10_*.csv" -print -delete || true
+      - name: Commit cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(cleanup-smoke): delete temp csv" || echo "nothing to commit"
+          git push
