@@ -57,9 +57,9 @@ jobs:
         run: python collector.py
 
       - name: Notify Slack (optional)
-        if: ${{ secrets.SLACK_WEBHOOK_URL != '' && success() }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: ${{ env.SLACK_WEBHOOK_URL != '' && success() }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
           --data "{\"text\":\"✅ Top10 collect OK — artifact uploadé\"}" \
