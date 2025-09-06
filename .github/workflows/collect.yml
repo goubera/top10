@@ -63,6 +63,10 @@ jobs:
           HELIUS_API_KEY:  ${{ secrets.HELIUS_API_KEY }}
         run: python collector.py
 
+      - name: Validate generated CSV
+        working-directory: solana-meme-top10-collector
+        run: python validate_csv.py
+
       # --- Slack optionnel (fix: on teste env.*, pas secrets.*) ---
       - name: Notify Slack (optional)
         env:
