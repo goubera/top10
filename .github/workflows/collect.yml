@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# Empêche 2 runs simultanés de se marcher dessus
+concurrency:
+  group: daily-solana-top10
+  cancel-in-progress: true
+
 jobs:
   collect:
     permissions:
@@ -15,10 +20,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: main          # on se place explicitement sur main
+          fetch-depth: 0     # nécessaire pour pull/rebase propre
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -49,6 +55,7 @@ jobs:
         if: ${{ hashFiles('solana-meme-top10-collector/tests/**.py') == '' }}
         run: echo "No pytest tests collected. Skipping test step."
 
+      # --- Collector (ton script actuel, inchangé) ---
       - name: Run collector
         working-directory: solana-meme-top10-collector
         env:
@@ -56,21 +63,36 @@ jobs:
           HELIUS_API_KEY:  ${{ secrets.HELIUS_API_KEY }}
         run: python collector.py
 
+      # --- Slack optionnel (fix: on teste env.*, pas secrets.*) ---
       - name: Notify Slack (optional)
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         if: ${{ env.SLACK_WEBHOOK_URL != '' && success() }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
-          --data "{\"text\":\"✅ Top10 collect OK — artifact uploadé\"}" \
+          --data "{\"text\":\"✅ Top10 collect OK — artifact/commit à jour\"}" \
           "$SLACK_WEBHOOK_URL"
 
-      - name: Configure git identity
+      # --- Debug Git (n’affecte pas le run, juste pour visibilité) ---
+      - name: Git debug state
+        run: |
+          git --version
+          git status -sb || true
+          git rev-parse --abbrev-ref HEAD || true
+          git log -1 --oneline || true
+
+      # --- Commit & Push (robuste, sans action externe) ---
+      - name: Configure git & ensure main branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          BRANCH="main"
+          git fetch origin "$BRANCH"
+          git checkout -B "$BRANCH" "origin/$BRANCH" || git checkout -B "$BRANCH"
+          git branch --set-upstream-to=origin/$BRANCH "$BRANCH" || true
 
-      - name: Stage generated files (CSV/archives)
+      - name: Stage generated files
         run: |
           git add -A solana-meme-top10-collector/data || true
           git add -A solana-meme-top10-collector/archive || true
@@ -79,15 +101,9 @@ jobs:
             echo "SKIP_PUSH=1" >> $GITHUB_ENV
           fi
 
-      - name: Pull latest (rebase) to avoid non-fast-forward
-        if: env.SKIP_PUSH != '1'
-        run: git pull --rebase
-
-      - name: Commit changes
+      - name: Rebase & push
         if: env.SKIP_PUSH != '1'
         run: |
+          git pull --rebase origin main || true
           git commit -m "chore(data): add daily artifacts [skip ci]" || echo "nothing to commit"
-
-      - name: Push
-        if: env.SKIP_PUSH != '1'
-        run: git push
+          git push origin HEAD:main
