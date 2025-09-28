@@ -1,0 +1,32 @@
+name: Archive smoke
+on: { workflow_dispatch: {} }
+jobs:
+  archive_smoke:
+    permissions: { contents: write }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Prepare fake last-month file
+        run: |
+          mkdir -p solana-meme-top10-collector/data
+          # génère un nom YYYY-MM-01 pour le mois dernier
+          TS=$(date -u -d "last month" +%Y-%m-01)
+          FILE="solana-meme-top10-collector/data/top10_${TS}.csv"
+          echo "date,chain,baseToken,baseSymbol,pairAddress,tokenAddress,priceUsd,liquidityUsd,volume24hUsd,txns24h,priceChange24h,createdAt,earlyReturnMultiple,holders,exitLiquidity,hasMintAuth,hasFreezeAuth,notes" > "$FILE"
+          echo "created fake: $FILE"
+      - name: Run monthly archive job script (same as prod)
+        run: |
+          Y=$(date -u -d "last month" +%Y)
+          M=$(date -u -d "last month" +%m)
+          SRC="solana-meme-top10-collector/data"
+          DEST="solana-meme-top10-collector/archive/${Y}-${M}"
+          mkdir -p "$DEST"
+          mv ${SRC}/top10_${Y}-${M}-*.csv "$DEST"/ 2>/dev/null || echo "No files to move"
+      - name: Commit smoke changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(archive-smoke): move last-month sample" || echo "nothing to commit"
+          git push

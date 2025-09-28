@@ -1,89 +1,173 @@
-"""Tools to collect and rank newly listed Solana meme coins.
-
-The original project depends on external libraries such as ``pandas``,
-``python-dotenv`` and ``requests``.  In the execution environment for these
-kata style exercises the network is disabled which means those dependencies
-cannot be installed.  Importing :mod:`collector` should therefore avoid
-importing optional dependencies at module import time so that the simple
-``rank_top10`` helper can be tested in isolation.
-
-To keep the public API intact we provide lightweight fallbacks for the
-external modules.  ``load_dotenv`` is treated as a no-op when the real
-package is missing and the heavy utility functions are imported lazily inside
-``main``.  This mirrors the behaviour of the original script without requiring
-any of the external packages to be present.
+"""
+Collector Solana Top10 — version fusionnée
+- Conserve la logique DexScreener Top10 (tri par volume24hUsd décroissant,
+  unicité par token address).
+- Respecte l'ordre EXACT des en-têtes CSV utilisé par la CI.
+- Échoue proprement (exit 1) + écrit data/run_summary.json si aucune donnée.
+- Fallbacks légers :
+    * pandas : optionnel (si absent, on écrit le CSV sans pandas)
+    * dotenv : optionnel (si présent, on charge .env)
 """
 
 import os
-import pandas as pd
+import csv
+import json
+import time
+import datetime
+from typing import Any, Dict, List, Optional
 
-try:  # pragma: no cover - executed only when python-dotenv is installed
-    from dotenv import load_dotenv  # type: ignore
+# --- Fallbacks optionnels -----------------------------------------------------
+try:
+    import pandas as pd  # type: ignore
 except Exception:  # pragma: no cover
-    # Minimal stub when ``python-dotenv`` isn't available.  The function simply
-    # returns ``False`` which matches the real package's behaviour when no
-    # .env file is loaded.
-    def load_dotenv(*args, **kwargs):  # type: ignore
-        return False
+    pd = None  # type: ignore
 
-def rank_top10(df: pd.DataFrame, min_liq_usd: float = 5000.0):
-    filt = df[(df["liquidityUsd"].fillna(0) >= min_liq_usd)]
-    if filt.empty: return df.head(10)
-    return filt.sort_values(by=["priceChange24h","volume24hUsd"], ascending=[False,False]).head(10)
-
-def main():
-    from utils import now_iso_date, fetch_new_pairs_dexscreener, enrich_birdeye, ts_ms_to_iso
-
+try:
+    from dotenv import load_dotenv  # type: ignore
     load_dotenv()
-    date_str = now_iso_date()
-    out_path = os.path.join("data", f"top10_{date_str}.csv")
-    os.makedirs("data", exist_ok=True)
+except Exception:
+    pass
 
-    dex_key = os.getenv("DEXSCREENER_API_KEY") or None
-    birdeye_key = os.getenv("BIRDEYE_API_KEY") or None
-    if not birdeye_key:
-        print("[WARN] BIRDEYE_API_KEY missing - skipping enrichment")
-    max_pairs = int(os.getenv("MAX_NEW_PAIRS", "500"))
-    min_liq = float(os.getenv("MIN_LIQUIDITY_USD", "5000"))
+# --- Config générique ---------------------------------------------------------
+DATE_STR = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+HEADERS = [
+    "date", "chain", "baseToken", "baseSymbol", "pairAddress", "tokenAddress",
+    "priceUsd", "liquidityUsd", "volume24hUsd", "txns24h", "priceChange24h",
+    "createdAt", "earlyReturnMultiple", "holders", "exitLiquidity",
+    "hasMintAuth", "hasFreezeAuth", "notes"
+]
+DEX_API = "https://api.dexscreener.com"
+DEX_KEY = os.getenv("DEXSCREENER_API_KEY", "").strip()
 
-    pairs = fetch_new_pairs_dexscreener(dex_key, max_pairs=max_pairs)
-    print(f"[INFO] Dexscreener pairs fetched: {len(pairs)}")
+def _num(x, default=""):
+    try:
+        if x is None or x == "":
+            return default
+        return float(x)
+    except Exception:
+        return default
 
-    rows = []
+# --- HTTP minimal (requests standard, sans dépendances supplémentaires) -------
+def _http_get(path: str, params: Optional[Dict[str, Any]] = None, timeout: int = 20) -> Dict[str, Any]:
+    import requests  # lazy import
+    url = f"{DEX_API}{path}"
+    headers = {"Accept": "application/json"}
+    if DEX_KEY:
+        headers["X-API-Key"] = DEX_KEY
+
+    backoffs = [0, 1, 2, 4, 8]
+    last_err = None
+    for b in backoffs:
+        if b:
+            time.sleep(b)
+        try:
+            r = requests.get(url, params=params or {}, headers=headers, timeout=timeout)
+            # Retry doux sur 429/5xx
+            if r.status_code in (429, 500, 502, 503, 504):
+                last_err = (r.status_code, r.text[:200])
+                continue
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:  # réseau, timeouts, etc.
+            last_err = str(e)
+            continue
+    raise RuntimeError(f"GET {path} failed after retries: {last_err}")
+
+# --- DexScreener helpers ------------------------------------------------------
+def _search_pairs_solana(query: str = "SOL", limit: int = 300) -> List[Dict[str, Any]]:
+    """ /latest/dex/search?q=... → filtre chain solana """
+    data = _http_get("/latest/dex/search", params={"q": query})
+    pairs = data.get("pairs") or data.get("result") or []
+    sol = [p for p in pairs if str(p.get("chainId") or p.get("chain") or "").lower() == "solana"]
+    return sol[:limit]
+
+def _vol24_usd(p: Dict[str, Any]) -> float:
+    # champs possibles selon endpoint: volume24hUsd ou volume.h24
+    v = p.get("volume24hUsd")
+    if v is None:
+        v = (p.get("volume") or {}).get("h24")
+    try:
+        return float(v or 0.0)
+    except Exception:
+        return 0.0
+
+# --- Collecte & normalisation -------------------------------------------------
+def collect_rows() -> List[Dict[str, Any]]:
+    # 1) Échantillon large
+    pairs = _search_pairs_solana(query="SOL", limit=300)
+
+    # 2) Meilleure paire par token base (max volume 24h)
+    by_token: Dict[str, Dict[str, Any]] = {}
     for p in pairs:
-        sec = enrich_birdeye(p.get("tokenAddress"), birdeye_key)
+        base = p.get("baseToken") or {}
+        addr = base.get("address") or ""
+        if not addr:
+            continue
+        cur = by_token.get(addr)
+        if cur is None or _vol24_usd(p) > _vol24_usd(cur):
+            by_token[addr] = p
+
+    # 3) Tri décroissant & top10
+    best = sorted(by_token.values(), key=_vol24_usd, reverse=True)[:10]
+
+    # 4) Mapping → schéma CSV
+    rows: List[Dict[str, Any]] = []
+    for p in best:
+        chain = (p.get("chainId") or p.get("chain") or "solana").lower()
+        base = p.get("baseToken") or {}
+        liq  = p.get("liquidity") or {}
+        tx   = p.get("txns") or {}
+        chg  = p.get("priceChange") or {}
+
         rows.append({
-            "date": date_str,
-            "chain": p.get("chain"),
-            "baseToken": p.get("baseToken"),
-            "baseSymbol": p.get("baseSymbol"),
-            "pairAddress": p.get("pairAddress"),
-            "tokenAddress": p.get("tokenAddress"),
-            "priceUsd": p.get("priceUsd"),
-            "liquidityUsd": p.get("liquidityUsd"),
-            "volume24hUsd": p.get("volume24hUsd"),
-            "txns24h": p.get("txns24h"),
-            "priceChange24h": p.get("priceChange24h"),
-            "createdAt": ts_ms_to_iso(p.get("createdAt")) if p.get("createdAt") else "",
-            "earlyReturnMultiple": None,  # à compléter en V2 (OHLCV Birdeye)
-            "holders": sec.get("holders"),
-            "exitLiquidity": sec.get("exitLiquidity"),
-            "hasMintAuth": sec.get("hasMintAuth"),
-            "hasFreezeAuth": sec.get("hasFreezeAuth"),
+            "date": DATE_STR,
+            "chain": chain,
+            "baseToken": base.get("name") or base.get("symbol") or "",
+            "baseSymbol": base.get("symbol") or "",
+            "pairAddress": p.get("pairAddress") or p.get("pairId") or "",
+            "tokenAddress": base.get("address") or "",
+            "priceUsd": _num(p.get("priceUsd")),
+            "liquidityUsd": _num(liq.get("usd") if isinstance(liq, dict) else liq),
+            "volume24hUsd": _num(_vol24_usd(p)),
+            "txns24h": int((tx.get("h24") if isinstance(tx, dict) else tx) or 0),
+            "priceChange24h": _num(chg.get("h24") if isinstance(chg, dict) else chg),
+            "createdAt": int(p.get("pairCreatedAt") or p.get("createdAt") or 0),
+            "earlyReturnMultiple": "",
+            "holders": "",
+            "exitLiquidity": "",
+            "hasMintAuth": "",
+            "hasFreezeAuth": "",
             "notes": "",
         })
+    return rows
 
-    df = pd.DataFrame(rows, columns=[
-        "date","chain","baseToken","baseSymbol","pairAddress","tokenAddress",
-        "priceUsd","liquidityUsd","volume24hUsd","txns24h","priceChange24h",
-        "createdAt","earlyReturnMultiple","holders","exitLiquidity",
-        "hasMintAuth","hasFreezeAuth","notes"
-    ])
-
-    top10 = rank_top10(df, min_liq_usd=min_liq) if not df.empty else df
-    print(f"[INFO] Pairs after filters: {len(top10)}")
-    top10.to_csv(out_path, index=False)
-    print(f"[OK] {len(top10)} rows -> {out_path}")
-
+# --- Entrée principale --------------------------------------------------------
 if __name__ == "__main__":
-    main()
+    rows = collect_rows()
+
+    # Si aucune donnée → on échoue proprement + résumé pour la CI
+    if not rows:
+        os.makedirs("data", exist_ok=True)
+        with open(os.path.join("data", "run_summary.json"), "w", encoding="utf-8") as f:
+            json.dump({"date": DATE_STR, "raw_pairs": 0, "reason": "dexscreener_pairs_empty"}, f)
+        raise SystemExit(1)
+
+    # Écriture CSV (pandas si dispo, sinon csv standard)
+    os.makedirs("data", exist_ok=True)
+    out = os.path.join("data", f"top10_{DATE_STR}.csv")
+
+    if pd is not None:
+        df = pd.DataFrame(rows)
+        # Assure tri & unicité
+        df = df.sort_values("volume24hUsd", ascending=False)
+        df = df.drop_duplicates(subset=["tokenAddress"], keep="first")
+        df = df[HEADERS]
+        df.to_csv(out, index=False)
+    else:
+        with open(out, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=HEADERS)
+            w.writeheader()
+            for r in rows:
+                w.writerow(r)
+
+    print(f"Wrote {out} with {len(rows)} rows")

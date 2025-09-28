@@ -1,6 +1,15 @@
+# Virtualenv and local config
 .venv/
 .env
 __pycache__/
 *.log
-data/*.csv
-!data/.gitkeep
+
+# Allow CSV outputs but ignore other files in data
+!data/
+!data/*.csv
+data/run_summary.json
+
+# Archive directory
+!archive/
+!archive/**/*.csv
+

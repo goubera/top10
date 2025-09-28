@@ -1,0 +1,1 @@
+date,chain,baseToken,baseSymbol,pairAddress,tokenAddress,priceUsd,liquidityUsd,volume24hUsd,txns24h,priceChange24h,createdAt,earlyReturnMultiple,holders,exitLiquidity,hasMintAuth,hasFreezeAuth,notes
