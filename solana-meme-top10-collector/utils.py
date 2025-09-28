@@ -45,34 +45,37 @@ def safe_int(x):
     except: return 0
 
 def fetch_new_pairs_dexscreener(api_key: str | None, max_pairs: int = 500):
-    headers = {"X-API-KEY": api_key} if api_key else {}
-    pairs = []
-    for url in DEX_NEW_PAIRS_URLS:
-        data = http_get(url, headers=headers)
-        if "_error" in data:
-            logger.warning("Dexscreener error: %s", data['_error'])
-            continue
-        pairs = data.get("pairs") or []
-        if pairs:
-            break
-    if not pairs:
-        logger.warning("Dexscreener returned no pairs")
-        return []
+    """
+    Utilise /latest/dex/search?q=SOL puis filtre chainId=solana.
+    Normalise les champs attendus par le collector.
+    """
+    headers = {"X-API-KEY": (api_key or "").strip()} if api_key else {}
+    data = http_get(
+        "https://api.dexscreener.com/latest/dex/search",
+        headers=headers,
+        params={"q": "SOL"},
+    )
+    pairs = (data.get("pairs") or data.get("result") or [])
+    pairs = [p for p in pairs if str(p.get("chainId") or p.get("chain") or "").lower() == "solana"]
     out = []
     for p in pairs[:max_pairs]:
+        base = (p.get("baseToken") or {})
+        txns_h24 = ((p.get("txns") or {}).get("h24") or {})
         out.append({
             "chain": p.get("chainId") or "solana",
-            "pairAddress": p.get("pairAddress") or "",
-            "tokenAddress": (p.get("baseToken") or {}).get("address") or "",
-            "baseSymbol": (p.get("baseToken") or {}).get("symbol") or "",
-            "baseToken": (p.get("baseToken") or {}).get("name") or "",
+            "pairAddress": p.get("pairAddress") or p.get("pairId") or "",
+            "tokenAddress": base.get("address") or "",
+            "baseSymbol": base.get("symbol") or "",
+            "baseToken": base.get("name") or "",
             "priceUsd": safe_float(p.get("priceUsd")),
             "liquidityUsd": safe_float((p.get("liquidity") or {}).get("usd")),
-            "volume24hUsd": safe_float((p.get("volume") or {}).get("h24")),
-            "txns24h": safe_int(((p.get("txns") or {}).get("h24") or {}).get("buys", 0)) + safe_int(((p.get("txns") or {}).get("h24") or {}).get("sells", 0)),
+            "volume24hUsd": safe_float((p.get("volume24hUsd") or (p.get("volume") or {}).get("h24"))),
+            "txns24h": safe_int(txns_h24.get("buys")) + safe_int(txns_h24.get("sells")),
             "priceChange24h": safe_float((p.get("priceChange") or {}).get("h24")),
-            "createdAt": p.get("pairCreatedAt"),
+            "createdAt": p.get("pairCreatedAt") or p.get("createdAt"),
         })
+    if not out:
+        logger.warning("Dexscreener /latest/dex/search returned no Solana pairs")
     return out
 
 def enrich_birdeye(token_address: str, birdeye_key: str | None):

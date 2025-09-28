@@ -13,5 +13,8 @@ with open(path, newline="", encoding="utf-8") as f:
     reader = csv.DictReader(f)
     if list(reader.fieldnames) != EXPECTED:
         print("Bad headers:", reader.fieldnames); sys.exit(2)
-    # OK même si aucune ligne de data
+    rows = list(reader)
+    if len(rows) == 0:
+        print("CSV has 0 data rows:", path)
+        sys.exit(3)
 print("CSV validated:", path)
