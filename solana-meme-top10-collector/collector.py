@@ -1,5 +1,6 @@
 """
-Collector Solana Top10 — version fusionnée
+Collector Solana Top10 — version fusionnée avec multi-source fallback
+- Utilise le module data_sources.py avec fallback automatique
 - Conserve la logique DexScreener Top10 (tri par volume24hUsd décroissant,
   unicité par token address).
 - Respecte l'ordre EXACT des en-têtes CSV utilisé par la CI.
@@ -12,9 +13,9 @@ Collector Solana Top10 — version fusionnée
 import os
 import csv
 import json
-import time
 import datetime
-from typing import Any, Dict, List, Optional
+import logging
+from typing import Any, Dict, List
 
 # --- Fallbacks optionnels -----------------------------------------------------
 try:
@@ -28,6 +29,16 @@ try:
 except Exception:
     pass
 
+# Import multi-source data fetcher
+from data_sources import fetch_top_solana_pairs
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # --- Config générique ---------------------------------------------------------
 DATE_STR = datetime.datetime.utcnow().strftime("%Y-%m-%d")
 HEADERS = [
@@ -36,8 +47,6 @@ HEADERS = [
     "createdAt", "earlyReturnMultiple", "holders", "exitLiquidity",
     "hasMintAuth", "hasFreezeAuth", "notes"
 ]
-DEX_API = "https://api.dexscreener.com"
-DEX_KEY = os.getenv("DEXSCREENER_API_KEY", "").strip()
 
 def _num(x, default=""):
     try:
@@ -46,40 +55,6 @@ def _num(x, default=""):
         return float(x)
     except Exception:
         return default
-
-# --- HTTP minimal (requests standard, sans dépendances supplémentaires) -------
-def _http_get(path: str, params: Optional[Dict[str, Any]] = None, timeout: int = 20) -> Dict[str, Any]:
-    import requests  # lazy import
-    url = f"{DEX_API}{path}"
-    headers = {"Accept": "application/json"}
-    if DEX_KEY:
-        headers["X-API-Key"] = DEX_KEY
-
-    backoffs = [0, 1, 2, 4, 8]
-    last_err = None
-    for b in backoffs:
-        if b:
-            time.sleep(b)
-        try:
-            r = requests.get(url, params=params or {}, headers=headers, timeout=timeout)
-            # Retry doux sur 429/5xx
-            if r.status_code in (429, 500, 502, 503, 504):
-                last_err = (r.status_code, r.text[:200])
-                continue
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:  # réseau, timeouts, etc.
-            last_err = str(e)
-            continue
-    raise RuntimeError(f"GET {path} failed after retries: {last_err}")
-
-# --- DexScreener helpers ------------------------------------------------------
-def _search_pairs_solana(query: str = "SOL", limit: int = 300) -> List[Dict[str, Any]]:
-    """ /latest/dex/search?q=... → filtre chain solana """
-    data = _http_get("/latest/dex/search", params={"q": query})
-    pairs = data.get("pairs") or data.get("result") or []
-    sol = [p for p in pairs if str(p.get("chainId") or p.get("chain") or "").lower() == "solana"]
-    return sol[:limit]
 
 def _vol24_usd(p: Dict[str, Any]) -> float:
     # champs possibles selon endpoint: volume24hUsd ou volume.h24
@@ -93,8 +68,23 @@ def _vol24_usd(p: Dict[str, Any]) -> float:
 
 # --- Collecte & normalisation -------------------------------------------------
 def collect_rows() -> List[Dict[str, Any]]:
-    # 1) Échantillon large
-    pairs = _search_pairs_solana(query="SOL", limit=300)
+    """
+    Collect top 10 Solana pairs using multi-source fallback strategy.
+
+    Returns:
+        List of row dictionaries ready for CSV export
+
+    Raises:
+        RuntimeError: If all data sources fail
+    """
+    # 1) Fetch from data sources with automatic fallback
+    logger.info(f"Starting data collection for {DATE_STR}")
+    pairs = fetch_top_solana_pairs(limit=300)
+
+    if not pairs:
+        raise RuntimeError("No pairs returned from any data source")
+
+    logger.info(f"Received {len(pairs)} pairs from data source")
 
     # 2) Meilleure paire par token base (max volume 24h)
     by_token: Dict[str, Dict[str, Any]] = {}
@@ -107,8 +97,11 @@ def collect_rows() -> List[Dict[str, Any]]:
         if cur is None or _vol24_usd(p) > _vol24_usd(cur):
             by_token[addr] = p
 
+    logger.info(f"Found {len(by_token)} unique tokens")
+
     # 3) Tri décroissant & top10
     best = sorted(by_token.values(), key=_vol24_usd, reverse=True)[:10]
+    logger.info(f"Selected top {len(best)} pairs by volume")
 
     # 4) Mapping → schéma CSV
     rows: List[Dict[str, Any]] = []
@@ -143,31 +136,72 @@ def collect_rows() -> List[Dict[str, Any]]:
 
 # --- Entrée principale --------------------------------------------------------
 if __name__ == "__main__":
-    rows = collect_rows()
-
-    # Si aucune donnée → on échoue proprement + résumé pour la CI
-    if not rows:
-        os.makedirs("data", exist_ok=True)
-        with open(os.path.join("data", "run_summary.json"), "w", encoding="utf-8") as f:
-            json.dump({"date": DATE_STR, "raw_pairs": 0, "reason": "dexscreener_pairs_empty"}, f)
-        raise SystemExit(1)
-
-    # Écriture CSV (pandas si dispo, sinon csv standard)
     os.makedirs("data", exist_ok=True)
-    out = os.path.join("data", f"top10_{DATE_STR}.csv")
+    summary_file = os.path.join("data", "run_summary.json")
 
-    if pd is not None:
-        df = pd.DataFrame(rows)
-        # Assure tri & unicité
-        df = df.sort_values("volume24hUsd", ascending=False)
-        df = df.drop_duplicates(subset=["tokenAddress"], keep="first")
-        df = df[HEADERS]
-        df.to_csv(out, index=False)
-    else:
-        with open(out, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=HEADERS)
-            w.writeheader()
-            for r in rows:
-                w.writerow(r)
+    try:
+        rows = collect_rows()
 
-    print(f"Wrote {out} with {len(rows)} rows")
+        # Si aucune donnée → on échoue proprement + résumé pour la CI
+        if not rows:
+            logger.error("No rows collected!")
+            with open(summary_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "date": DATE_STR,
+                    "success": False,
+                    "raw_pairs": 0,
+                    "reason": "no_pairs_after_filtering",
+                    "message": "Data sources returned data but filtering resulted in 0 pairs"
+                }, f, indent=2)
+            raise SystemExit(1)
+
+        # Écriture CSV (pandas si dispo, sinon csv standard)
+        out = os.path.join("data", f"top10_{DATE_STR}.csv")
+
+        if pd is not None:
+            df = pd.DataFrame(rows)
+            # Assure tri & unicité
+            df = df.sort_values("volume24hUsd", ascending=False)
+            df = df.drop_duplicates(subset=["tokenAddress"], keep="first")
+            df = df[HEADERS]
+            df.to_csv(out, index=False)
+        else:
+            with open(out, "w", newline="", encoding="utf-8") as f:
+                w = csv.DictWriter(f, fieldnames=HEADERS)
+                w.writeheader()
+                for r in rows:
+                    w.writerow(r)
+
+        # Write success summary
+        with open(summary_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "date": DATE_STR,
+                "success": True,
+                "rows_collected": len(rows),
+                "csv_file": out
+            }, f, indent=2)
+
+        logger.info(f"✓ Successfully wrote {out} with {len(rows)} rows")
+        print(f"Wrote {out} with {len(rows)} rows")
+
+    except Exception as e:
+        # Log error and write failure summary
+        logger.error(f"Collection failed: {e}", exc_info=True)
+
+        with open(summary_file, "w", encoding="utf-8") as f:
+            json.dump({
+                "date": DATE_STR,
+                "success": False,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "message": (
+                    "Data collection failed. This usually means:\n"
+                    "1. DexScreener API requires an API key (set DEXSCREENER_API_KEY)\n"
+                    "2. All fallback APIs are unavailable\n"
+                    "3. Network connectivity issues\n\n"
+                    "To fix: Get a free API key from https://dexscreener.com/ and add it to GitHub Secrets"
+                )
+            }, f, indent=2)
+
+        # Exit with error code
+        raise SystemExit(1)
