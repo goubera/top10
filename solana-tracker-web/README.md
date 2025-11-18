@@ -110,9 +110,10 @@ The system collects tokens based on:
 
 ### Data Sources
 
-- **DexScreener API** - Primary source for DEX data
-- No API key required for basic usage
-- Rate limiting handled with exponential backoff
+- **Birdeye API** - FREE tier (30k crédits/mois)
+- Inscription gratuite requise (pas de CB)
+- Fallback sur données mockées si pas de clé API
+- Guide complet : [API_SETUP.md](./API_SETUP.md)
 
 ## 📊 Dashboard Features
 
@@ -171,13 +172,17 @@ scheduler.add_job(
 
 ## 🔧 Configuration
 
-### Environment Variables (Optional)
+### Environment Variables (Recommandé)
 
 Create `.env` file in backend/:
 
 ```env
-DEXSCREENER_API_KEY=your_key_here  # Optional, for higher rate limits
+BIRDEYE_API_KEY=your_key_here  # FREE tier - voir API_SETUP.md
 ```
+
+**Obtenir une clé gratuite** : [Guide détaillé](./API_SETUP.md)
+
+**Sans clé API** : L'app fonctionne avec données mockées réalistes
 
 ### Customization
 

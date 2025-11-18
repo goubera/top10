@@ -23,28 +23,37 @@ Then open: **http://localhost:8000/static/index.html**
 
 ---
 
-## ⚠️ Important: DexScreener API Key
+## 🔑 API Configuration (Optionnel mais recommandé)
 
-The DexScreener API currently requires authentication. You may encounter **403 Forbidden** errors without an API key.
+L'application fonctionne de 2 façons :
 
-### Getting an API Key
+### ✅ Option 1 : Avec clé API Birdeye (GRATUIT, recommandé)
 
-1. Visit [DexScreener API Documentation](https://docs.dexscreener.com/)
-2. Sign up for an API key
-3. Add to your environment:
+**Avantages** :
+- Données réelles en temps réel
+- 30,000 crédits/mois GRATUITS
+- Pas de carte bancaire requise
+
+**Setup** (2 minutes) :
+1. Créer compte sur [Birdeye.so](https://birdeye.so) (gratuit)
+2. Obtenir votre clé API
+3. Configurer :
 
 ```bash
 cd backend
-echo "DEXSCREENER_API_KEY=your_key_here" > .env
+echo "BIRDEYE_API_KEY=votre_cle_ici" > .env
 ```
 
-### Testing without API Key
+📖 **[Guide complet avec screenshots](./API_SETUP.md)**
 
-The system is fully functional but needs the API key to collect real data. You can:
+### ⚡ Option 2 : Sans clé API (Mode démo)
 
-1. **Test the UI**: The dashboard will load but show "No data available"
-2. **Use mock data**: See below for mock data script
-3. **Get API key**: Follow steps above for real data
+L'application fonctionne directement avec **données mockées réalistes** :
+- Dashboard complet fonctionnel
+- Tokens de test (BONK, WIF, POPCAT...)
+- Parfait pour tester l'interface
+
+Pas de configuration nécessaire, lancez directement !
 
 ---
 
