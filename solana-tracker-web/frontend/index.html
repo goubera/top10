@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solana Token Tracker - Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>🚀 Solana Token Tracker</h1>
+            <p class="subtitle">Real-time tracking of top gainers and new Solana tokens</p>
+            <div class="header-actions">
+                <button id="refreshBtn" class="btn btn-primary">🔄 Refresh Data</button>
+                <button id="collectBtn" class="btn btn-secondary">📥 Collect Now</button>
+                <button id="exportBtn" class="btn btn-secondary">💾 Export CSV</button>
+            </div>
+        </header>
+
+        <!-- Stats Cards -->
+        <section class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Tokens Tracked Today</div>
+                <div class="stat-value" id="tokensTracked">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Total Volume 24h</div>
+                <div class="stat-value" id="totalVolume">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">New Tokens</div>
+                <div class="stat-value" id="newTokens">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Avg Price Change</div>
+                <div class="stat-value" id="avgChange">-</div>
+            </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-section">
+            <div class="chart-container">
+                <h2>📊 Volume Trend (Last 7 Days)</h2>
+                <canvas id="volumeChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2>📈 New Tokens Trend</h2>
+                <canvas id="newTokensChart"></canvas>
+            </div>
+        </section>
+
+        <!-- Tables Section -->
+        <section class="tables-section">
+            <!-- Top Gainers -->
+            <div class="table-container">
+                <h2>🔥 Top Gainers by Volume</h2>
+                <div class="table-wrapper">
+                    <table id="topGainersTable">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Symbol</th>
+                                <th>Name</th>
+                                <th>Price</th>
+                                <th>Volume 24h</th>
+                                <th>Change 24h</th>
+                                <th>Liquidity</th>
+                                <th>Market Cap</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="8" class="loading">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- New Tokens -->
+            <div class="table-container">
+                <h2>✨ New Tokens (Last 24h)</h2>
+                <div class="table-wrapper">
+                    <table id="newTokensTable">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Symbol</th>
+                                <th>Name</th>
+                                <th>Price</th>
+                                <th>Volume 24h</th>
+                                <th>Change 24h</th>
+                                <th>Liquidity</th>
+                                <th>Age</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="8" class="loading">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Trending Tokens -->
+            <div class="table-container">
+                <h2>🔥 Trending Tokens (Multi-day appearances)</h2>
+                <div class="table-wrapper">
+                    <table id="trendingTable">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Symbol</th>
+                                <th>Address</th>
+                                <th>Days in Top</th>
+                                <th>Avg Volume</th>
+                                <th>Avg Change</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="6" class="loading">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer>
+            <p>Last updated: <span id="lastUpdate">-</span></p>
+            <p>Data source: DexScreener API</p>
+        </footer>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="overlay hidden">
+        <div class="spinner"></div>
+        <p>Loading data...</p>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
