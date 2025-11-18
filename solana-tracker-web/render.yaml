@@ -1,0 +1,5 @@
+[build]
+  command = "pip install -r backend/requirements.txt && python backend/create_mock_data.py"
+
+[start]
+  command = "cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT"
